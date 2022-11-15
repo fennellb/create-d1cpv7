@@ -1,0 +1,758 @@
+<html>
+<head>
+<title>Sudoku Puzzle Solver</title>
+<script type="text/javascript">
+
+String.prototype.erase = function(ch)
+{
+	return (this.split(ch)).join('');
+}
+
+function debug(sMsg)
+{
+	var oDebug = document.getElementById('debug');
+	oDebug.innerHTML += sMsg;
+}
+function clrDebug()
+{
+	var oDebug = document.getElementById('debug');
+	oDebug.innerHTML = '';
+}
+
+function SudokuCell(c,i,j,g)
+{
+	this.c = c;
+	this.nRow = i;
+	this.nColumn = j;
+	this.nGroup = g;
+}
+SudokuCell.prototype.filter = function(c)
+{
+	var c2 = this.c.erase(c);
+	if ( this.c == c2) return false;
+
+	debug("[" + this.nRow + "][" + this.nColumn + "]: " + this.c + "-->" + c2 + "<br>")
+	this.c = c2;
+	return true;
+}
+// Sudoku Puzzle class
+function SudokuPuzzle(width,height,tokens)
+{
+	this.width = width;
+	this.height = height;
+	this.tokens = tokens.split('');
+
+	this.grid = new Array();
+	var i,j, n = width*height;
+	for ( i = 0; i < n; i++ )
+	{
+		var row = new Array();
+		for ( j = 0; j < n; j++ ) row.push(' ');
+		this.grid.push(row);
+	}
+
+	// iteration state
+	this.nIteration = 0;
+	this.nIdle = 0;
+}
+SudokuPuzzle.prototype.display = function(target, bInput)
+{
+	// display the puzzle in the target <DIV>
+	if ( arguments.length < 2 ) bInput = false;
+
+	var n = this.width * this.height;
+	var i,j;
+
+	// generate <table> of to display grid
+	var html = new Array();
+	html.push('<table border=3>');
+	for ( i = 0; i < n; i++ )
+	{
+		html.push('<tr>');
+		for ( j = 0; j < n; j++ )
+		{
+			var bColour = ((Math.floor(i/this.height)%2) ^ (Math.floor(j/this.width)%2));
+			var sColour = bColour ? "#e5e5cc;" : "white";
+			var sStyle = 'background:' + sColour + ';';
+			sStyle += " width:35px; height:30px;";
+			html.push('<td align=center valign=middle style="' + sStyle + '">');
+			if ( bInput ) html.push(this.displayInputCell(i,j));
+			else html.push(this.displayCell(i,j));
+			html.push('</td>')
+		}
+		html.push('</tr>');
+	}
+	html.push('</table>');
+	target.innerHTML = html.join('');
+}
+function gridKey(oInput, evt)
+{
+	var e = evt ? evt : window.event;
+	// check for arrow key
+
+	var dx = 0;
+	var dy = 0;
+
+	switch ( e.keyCode )
+	{
+		case 37: dx--; break; // left arrow
+		case 38: dy--; break; // up arrow
+		case 39: dx++; break; // right arrow
+		case 40: dy++; break; // down arrow
+		case 13: dy++, dx=100; break; // return key
+		default: return;
+	}
+	var sID = oInput.id.substring(7);
+	var a = sID.split('_');
+	var y = parseInt(a[0]);
+	var x = parseInt(a[1]);
+
+	if (dx == 100) x = 0; else x += dx;
+	y += dy;
+	var oInput2 = document.getElementById('sudoku_' + y + '_' + x);
+	if ( oInput2 ) oInput2.focus();
+}
+SudokuPuzzle.prototype.displayInputCell = function(i,j)
+{
+	var value = this.grid[i][j];
+	if ( value == ' ' ) value = '';
+
+	var id = 'sudoku_' + i + '_' + j;
+	return '<input style="width:30px" id="' + id +
+			'" value="' + value +
+			'" onkeydown="gridKey(this,event);">';
+}
+SudokuPuzzle.prototype.displayCell = function(i,j)
+{
+	var value = this.grid[i][j];
+	var sStyle = "";
+	if ( value == ' ' )
+	{
+		// if no value supplied, display potential solutions
+		if ( this.solution )
+		{
+			value = this.solution[i][j].c;
+			if ( value.length > 1 ) sStyle += 'color:red';
+			else sStyle += 'color:blue';
+		}
+		else value = '&nbsp;';
+	}
+	else
+	{
+		// original values are displayed in bold.
+		sStyle += 'font-weight:bold';
+	}
+	return '<span style="' + sStyle + '">' + value + '</span>';
+}
+
+SudokuPuzzle.prototype.reset = function()
+{
+	delete this.solution;
+	this.nIteration = 0;
+	this.nIdle = 0;
+
+}
+SudokuPuzzle.prototype.isSolved = function()
+{
+	if ( !this.solution ) return false;
+
+	var n = this.height * this.width;
+
+	for ( var i = 0; i < n; i++ )
+	{
+		for ( var j = 0; j < n; j++ )
+		{
+			var chr = this.solution[i][j].c;
+			if ( chr.length > 1 ) return false;
+		}
+	}
+	return true;
+}
+SudokuPuzzle.prototype.initGrid = function()
+{
+	var i,j;
+	var n = this.width * this.height;
+	for ( i = 0; i < n; i++)
+	{
+		var r = thePuzzle.grid[i];
+		for ( j = 0; j < n; j++)
+		{
+			var v = document.getElementById('sudoku_' + i + '_' + j).value;
+			if ( v != '' ) r[j] = v;
+			else r[j] = ' ';
+		}
+	}
+}
+SudokuPuzzle.prototype.initSolution = function()
+{
+	// initialise the solution state
+	var sTokens = this.tokens.join('');
+	var w = this.width;
+	var h = this.height;
+	var n = this.tokens.length;
+	var i,j,k;
+
+	// build 2D array of potential solutions
+	var solution = this.solution = new Array();
+
+	// and an array of group members
+	var members = this.members = new Array();
+	for ( i = 0; i < n; i++ ) members.push(new Array());
+
+	for ( i = 0; i < n; i++ )
+	{
+		var row = new Array();
+		solution.push(row);
+		for ( j = 0; j < n; j++ )
+		{
+			// calculate the group number
+			var nGroup = Math.floor(i/h) * h + Math.floor(j/w);
+
+			var c = this.grid[i][j] != ' ' ? this.grid[i][j] : sTokens;
+			var oChar = new SudokuCell(c,i,j,nGroup);
+
+			members[nGroup].push(oChar);
+			row.push(oChar);
+		}
+	}
+}
+SudokuPuzzle.prototype.iterate = function()
+{
+	if ( !this.solution )
+	{
+		this.initSolution();
+		return true;
+	}
+	var nReturn = this.strategies[this.nIteration++ % this.strategies.length](this);
+	if ( nReturn == -1 )
+	{
+		// error
+		return false;
+	}
+	else if ( nReturn == 0 )
+	{
+		// nothing changed
+		if (++this.nIdle < this.strategies.length) return true;
+		else
+		{
+			clrDebug();
+			debug("Cannot solve this puzzle");
+		}
+	}
+	else
+	{
+		// something changed
+		if ( this.isSolved() )
+		{
+			clrDebug();
+			debug("Finished");
+			return false;
+		}
+		this.nIdle = 0;
+		return true;
+	}
+}
+SudokuPuzzle.prototype.strategies = [
+function(p)
+{
+	var nReturn = 0;
+
+	clrDebug();
+	debug('Eliminate dead certs in row/column/group<br>');
+
+	var n = p.width * p.height;
+	var i,j,k;
+	for ( i = 0; i < n; i++ )
+	{
+		for ( j = 0; j < n; j++ )
+		{
+			// calculate group number
+			var g = Math.floor(i/p.height) * p.height + Math.floor(j/p.width);
+
+			// get the solution for this cell and check if it is final
+			var s = p.solution[i][j];
+			var c = s.c
+			if ( c.length > 1 ) continue;
+
+			// eliminate symbol from rest of row
+			for ( k = 0; k < n; k++ )
+			{
+				if ( (k != j) && p.solution[i][k].filter(c) ) nReturn++;
+			}
+
+			// eliminate symbol from rest of column
+			for ( k = 0; k < n; k++ )
+			{
+				if ( (k != i) && p.solution[k][j].filter(c) ) nReturn++;
+			}
+
+			// eliminate symbol from rest of group
+			for ( k = 0; k < n; k++ )
+			{
+				var m = p.members[g][k];
+				if ( (s !== m) && p.members[g][k].filter(c) ) nReturn++;
+			}
+		}
+	}
+	return nReturn;
+},
+function(p)
+{
+	// look for rows/columns/groups where a token appears only once
+
+	var nReturn = 0;
+
+	clrDebug();
+	debug('Isolate individuals on each row/col/group<br>');
+
+	var n = p.width * p.height;
+	var i,j,k, t;
+	var tCount;
+
+	for ( t = 0; t < n; t++ )
+	{
+		// for each token
+		var token = p.tokens[t];
+
+		// count its occurrence in each row
+		for ( i = 0; i < n; i++ )
+		{
+			tCount = 0;
+			for ( j = 0; j < n; j++ )
+			{
+				if ( p.solution[i][j].c.search(token) >= 0 )
+				{
+					if ( tCount++ == 0 ) k = j;
+				}
+			}
+
+			// if more than one, move to the next row
+			if ( tCount > 1 ) continue;
+
+			// if not found, its an error
+			if ( tCount < 1 )
+			{
+				debug("Invalid cell state: token " + token + " missing from row " + i);
+				return -1;
+			}
+
+			if ( p.solution[i][k].c != token )
+			{
+				debug("[" + i + "][" + k +"]: R " + p.solution[i][k].c + "-->" + token + "<br>")
+				p.solution[i][k].c = token;
+				nReturn++;
+			}
+		}
+
+		// columns
+		for ( j = 0; j < n; j++ )
+		{
+			tCount = 0;
+			for ( i = 0; i < n; i++ )
+			{
+				if ( p.solution[i][j].c.search(token) >= 0 )
+				{
+					if ( tCount++ == 0 ) k = i;
+				}
+			}
+
+			// if more than one, move to the next row
+			if ( tCount > 1 ) continue;
+
+			// if not found, its an error
+			if ( tCount < 1 )
+			{
+				debug("Invalid cell state: token " + token + " missing from col " + k);
+				return -1;
+			}
+
+			if ( p.solution[k][j].c != token )
+			{
+				debug("[" + k + "][" + j + "]: C " + p.solution[k][j].c + "-->" + token + "<br>")
+				p.solution[k][j].c = token;
+				nReturn++;
+			}
+		}
+
+		// groups
+		for ( i = 0; i < n; i++ )
+		{
+			tCount = 0;
+			for ( j = 0; j < n; j++ )
+			{
+				if ( p.members[i][j].c.search(token) >= 0 )
+				if ( tCount++ == 0 ) k = j;
+			}
+
+			// if more than one, move to the next row
+			if ( tCount > 1 ) continue;
+
+			// if not found, its an error
+			if ( tCount < 1 )
+			{
+				debug("Invalid cell state: token missing from grp");
+				return -1;
+			}
+
+			if ( p.members[i][k].c != token )
+			{
+				debug("[" + i + "][" + k + "]: G " + p.members[i][k].c + "-->" + token + "<br>")
+				p.members[i][k].c = token;
+				nReturn++;
+			}
+		}
+	}
+	return nReturn;
+},
+function(p)
+{
+	var nReturn = 0;
+
+	clrDebug();
+	debug('Look for patterns<br>');
+
+	var n = p.width * p.height;
+	var i,j,k,l, tCount;
+	var kChar, ch, chr;
+	for ( i = 0; i < n; i++ )
+	{
+		for ( j = 0; j < n; j++ )
+		{
+			// calculate group number from grid coordinates
+			var nGroup = Math.floor(i/p.height) * p.height + Math.floor(j/p.width);
+
+			// look for incomplete cells
+			chr = p.solution[i][j].c;
+			if ( chr.length == 1 ) continue;
+
+			// search rows
+			tCount = 0;
+			for ( k = 0; k < n; k++ )
+			{
+				// count the number of cells with the same incomplete solution
+				kChar = p.solution[i][k];
+				if ( kChar.c == chr ) tCount++;
+			}
+			// if the number of cells equals the number of symbols
+			// then none of the symbols may exist elsewhere on the row
+			if ( tCount == chr.length )
+			{
+				for ( k = 0; k < n; k++ )
+				{
+					kChar = p.solution[i][k];
+					ch = kChar.c;
+					if ( ch != chr )
+					{
+						// erase the symbols from all other cells that
+						// have a different set of symbols.
+						for ( l = 0; l < chr.length; l++ )
+						{
+							ch = ch.erase(chr.charAt(l));
+						}
+						if ( kChar.c != ch )
+						{
+							// count the number of cells that get modified
+							kChar.c = ch;
+							nReturn++;
+						}
+					}
+				}
+			}
+
+			// search again with columns this time
+			tCount = 0;
+			for ( k = 0; k < n; k++ )
+			{
+				// count the number of cells with the same incomplete solution
+				kChar = p.solution[k][j];
+				if ( kChar.c == chr ) tCount++;
+			}
+			// if the number of cells equals the number of symbols
+			// then none of the symbols may exist elsewhere on the column
+			if ( tCount == chr.length )
+			{
+				for ( k = 0; k < n; k++ )
+				{
+					kChar = p.solution[k][j];
+					ch = kChar.c;
+					if ( ch != chr )
+					{
+						// erase the symbols from all other cells that
+						// have a different set of symbols.
+						for ( l = 0; l < chr.length; l++ )
+						{
+							ch = ch.erase(chr.charAt(l));
+						}
+						if ( kChar.c != ch )
+						{
+							// count the number of cells that get modified
+							kChar.c = ch;
+							nReturn++;
+						}
+					}
+				}
+			}
+
+			// search yet again, but within groups this time
+			tCount = 0;
+			var ijGroup = nGroup;
+			for ( k = 0; k < n; k++ )
+			{
+				// count the number of cells with the same incomplete solution
+				kChar = p.members[i][k];
+				if ( kChar.c == chr ) tCount++;
+			}
+			// if the number of cells equals the number of symbols
+			// then none of the symbols may exist elsewhere in the group
+			if ( tCount == chr.length )
+			{
+				for ( k = 0; k < n; k++ )
+				{
+					kChar = p.members[i][k];
+					ch = kChar.c;
+					if ( ch != chr )
+					{
+						// erase the symbols from all other cells that
+						// have a different set of symbols.
+						for ( l = 0; l < chr.length; l++ )
+						{
+							ch = ch.erase(chr.charAt(l));
+						}
+						if ( kChar.c != ch )
+						{
+							// count the number of cells that get modified
+							kChar.c = ch;
+							nReturn++;
+						}
+					}
+				}
+			}
+		}
+	}
+	return nReturn;
+},
+function(p)
+{
+	var nReturn = 0;
+
+	clrDebug();
+	debug('Look for column/row limited tokens<br>');
+
+	var n = p.width * p.height;
+	var i,j,k,l, tCount;
+	var oChar, oChar2, ch;
+	for ( i = 0; i < n; i++ )
+	{
+		// for each group
+		var group = p.members[i];
+
+		for ( j = 0; j < n; j++ )
+		{
+			// for each token
+			var token = p.tokens[j];
+
+			var nColMin = n;
+			var nColMax = -1;
+			var nRowMin = n;
+			var nRowMax = -1;
+
+			// iterate over members in group
+			for ( k = 0; k < n; k++ )
+			{
+				// find max and min rows and columns for token
+				var oChar = group[k];
+				if ( oChar.c.search(token) >= 0 )
+				{
+					if ( oChar.nColumn > nColMax ) nColMax = oChar.nColumn;
+					if ( oChar.nColumn < nColMin ) nColMin = oChar.nColumn;
+					if ( oChar.nRow > nRowMax ) nRowMax = oChar.nRow;
+					if ( oChar.nRow < nRowMin ) nRowMin = oChar.nRow;
+				}
+			}
+
+			// if token not found in group, error!
+			if ( (nColMax == -1) || (nRowMax == -1) )
+			{
+				clrDebug();
+				debug("Invalid cell state");
+				return -1;
+			}
+
+			// if token is limited to one column
+			if ( nColMin == nColMax )
+			{
+				// remove token from this column in all other groups
+				for ( l = 0; l < n; l++ )
+				{
+					oChar2 = p.solution[l][nColMin];
+					if ( oChar2.nGroup == i ) continue;
+					ch = oChar2.c.erase(token);
+					oChar2.c = ch;
+
+					if ( oChar2.c != ch )
+					{
+						debug("[" + l + "]["+ nColMin +"]: " + ch + "-->" + oChar2.c + "<br>");
+						nReturn++;
+					}
+				}
+			}
+
+			// if token is limited to one row
+			if ( nRowMin == nRowMax )
+			{
+				// remove token from this row in all other groups
+				for ( l = 0; l < n; l++ )
+				{
+					oChar2 = p.solution[nRowMin][l];
+					if ( oChar2.nGroup == i ) continue;
+					ch = oChar2.c;
+					oChar2.c = ch.erase(token);
+
+					if ( oChar2.c != ch )
+					{
+						debug("[" + nRowMin + "]["+ l +"]: " + ch + "-->" + oChar2.c + "<br>");
+						nReturn++;
+					}
+				}
+			}
+		}
+	}
+	return nReturn;
+}
+];
+
+var thePuzzle;
+
+function showPage(sPage, bShow)
+{
+	var div = document.getElementById(sPage);
+	div.style.visibility = bShow ? 'visible' : 'hidden';
+	div.style.position = bShow ? 'static' : 'absolute';
+}
+function setPage(sPage)
+{
+	showPage('start', sPage == 'start');
+	showPage('details', sPage == 'details');
+	showPage('solver', sPage == 'solver');
+	showPage('about', sPage == 'about');
+}
+
+function startResize()
+{
+	// get dimensions of group
+	var w = document.getElementById('startWidth').value;
+	var h = document.getElementById('startHeight').value;
+
+	// choose a suitable selection
+	var s = "123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ*%$�?@#+-=".substring(0, w*h);
+
+	// insert it into the textbox
+	document.getElementById('startSymbols').value = s;
+}
+
+function detailsInit()
+{
+	var w = parseInt(document.getElementById('startWidth').value);
+	var h = parseInt(document.getElementById('startHeight').value);
+	var s = document.getElementById('startSymbols').value;
+
+	if ( w*h > s.length )
+	{
+		debug("there are not enough symbols for this configuration");
+		return;
+	}
+
+	var oDetails = document.getElementById('detailsSymbols');
+	oDetails.innerHTML = w.toString() + 'x' + h.toString() + ', using ' + s;
+
+	thePuzzle = new SudokuPuzzle(w, h, s);
+	thePuzzle.display(document.getElementById('detailsGrid'),true);
+
+	setPage('details');
+}
+function solverInit()
+{
+	thePuzzle.initGrid();
+	thePuzzle.display(document.getElementById('solverGrid'));
+	setPage('solver');
+}
+function reset()
+{
+	thePuzzle.reset();
+	thePuzzle.display(document.getElementById('solverGrid'));
+}
+function reEntry()
+{
+	thePuzzle.reset();
+	setPage('details');
+}
+function solve()
+{
+	if ( thePuzzle.iterate() ) window.setTimeout("solve();", 500);
+	thePuzzle.display(document.getElementById('solverGrid'));
+}
+function iterate()
+{
+	thePuzzle.iterate();
+	thePuzzle.display(document.getElementById('solverGrid'));
+}
+
+
+</script>
+</head>
+<body>
+
+	<div id="start" style="position:static; visibility:visible">
+		<h2>Puzzle Specification</h2>
+		Enter group dimensions:<br>
+		Width: <input id="startWidth" value="3" onchange="startResize();" onfocus="this.select();"><br>
+		Height: <input id="startHeight" value="3" onchange="startResize();"  onfocus="this.select()"><br>
+		Symbols: <input id="startSymbols" value="123456789"><br>
+		<button onclick="detailsInit();">Grid Entry</button>&nbsp; &nbsp; <button onclick="setPage('about');">About</button>
+	</div>
+
+	<div id="details" style="position:absolute; visibility:hidden">
+		<h2>Grid Entry</h2>
+		<div id="detailsSymbols"></div>
+		<div id="detailsGrid"></div><br>
+		You may use cursor, arrow keys, and Enter key to navigate.<br>
+		<button onclick="solverInit();">Solve</button>
+	</div>
+
+	<div id="solver" style="position:absolute; visibility:hidden">
+		<h2>Solver</h2>
+		<div id="solverGrid"></div>
+		<button onclick="reset(thePuzzle);">Reset</button>
+		<button onclick="nReturnCount = 0; solve();">Solve</button><br>
+		<button onclick="nReturnCount = 0; iterate();">Iterate</button><br>
+		<button onclick="setPage('start');">New Puzzle</button>
+		<button onclick="reEntry();">Grid Entry</button>
+	</div>
+
+   <div id="about" style="position:absolute; visibility:hidden">
+		<h2>About</h2>
+		This script is taken from <a href="http://www.webreference.com/programming/javascript/gr/column16/index.html"
+		 target=new>webreference.com</a> with only a few changes by Warren Porter.  These are<br>
+		 <ul>
+		 <li>The function "SudokuCell" defines "nColumn" but the "SudokuCell.prototype.filter" underneath calls debug() with "nCol" causing
+		     the column to be "undefined" when displayed.</li>
+		 <li>Color changed from lime to a dark beige. The cell borders were made thicker in the "Grid Entry" section to help
+		     identify the group a cell is in.</li>
+		 <li>When in "Grid Entry", pressing the return key takes the user to the 1<sup>st</sup> cell on the next row. This is in
+		     addition to the use of the arrow keys.</li>
+		 <li>Solved cells appear in blue to distinguish them from original values (black).</li>
+		 <li>This page and code to display it.</li></ul>
+		 The author of this program is Guyon Roche and can be contacted at www.silver-daggers.co.uk (but take out the "-").<br>
+		<button onclick="setPage('start');">Back</button>
+   </div>
+
+	<div id="debug"></div><button onclick="clrDebug();">Clear</button>
+	<br><small>May 23, 2009</small>
+<script>
+if (Date.parse(document.lastModified) != 0)
+  document.write('<p><hr><small><i>Last modified: '
+                 + document.lastModified
+                 + '</i></small><br>');
+</script>
+</body>
+<script>'undefined'=== typeof _trfq || (window._trfq = []);'undefined'=== typeof _trfd && (window._trfd=[]),_trfd.push({'tccl.baseHost':'secureserver.net'},{'ap':'cpsh'},{'server':'a2plcpnl0617'},{'dcenter':'a2'},{'id':'2474113'}) // Monitoring performance to make your website faster. If you want to opt-out, please contact web hosting support.</script><script src='https://img1.wsimg.com/traffic-assets/js/tccl.min.js'></script><script src='https://img1.wsimg.com/traffic-assets/js/tccl-tti.min.js' onload='window.tti.calculateTTI()'></script></html>

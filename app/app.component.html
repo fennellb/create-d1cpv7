@@ -1,0 +1,4 @@
+<hello name="{{ name }}"></hello>
+<p>Start editing to see some magic happen :)</p>
+<p style="font-weight: 700; margin-bottom: 30px;">Results:</p>
+<p [innerHTML]="sanitizer.bypassSecurityTrustHtml(display)"></p>
