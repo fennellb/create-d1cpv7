@@ -25,6 +25,9 @@ This repository is an archival copy. No further development is planned.
 
 Open `index.html` directly in any browser. No server, build step, or dependencies required.
 
+Or click:
+[fennellb.github.io](https://fennellb.github.io/create-d1cpv7/).
+
 ## License
 
 The original code is the work of Guyon Roche. No explicit license was stated in the source.
