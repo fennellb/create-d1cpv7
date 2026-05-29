@@ -23,7 +23,7 @@ This repository is an archival copy. No further development is planned.
 
 ## Usage
 
-Open `sudoku.html` directly in any browser. No server, build step, or dependencies required.
+Open `index.html` directly in any browser. No server, build step, or dependencies required.
 
 ## License
 
